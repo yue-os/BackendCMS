@@ -1,63 +1,101 @@
 'use client'
 
-import React, { useState } from "react";
-import { Save, Plus, Newspaper, Megaphone } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { Save, Plus, Newspaper, Megaphone, Upload, Archive } from "lucide-react";
 import { toast } from "sonner";
+import {
+  createArticle,
+  fetchAdminArticles,
+  updateArticle,
+  updateArticleStatus,
+} from "@/lib/api";
+import type { Article, ArticleStatus } from "@/types/article";
 
-interface NewsItem {
-  id: string;
-  title: string;
-  category: string;
-  summary: string;
-  imageUrl: string;
-}
+type EditableArticle = Article & { isSaving?: boolean };
 
-const INITIAL_NEWS: NewsItem[] = [
-  {
-    id: "1",
-    title: "Sample News Headline",
-    category: "Announcements",
-    summary: "Placeholder content for CEIT News. Replace this with your actual post summary.",
-    imageUrl: "",
-  },
-];
-
-const NEWS_CATEGORIES = [
-  "Announcements",
-  "Events",
-  "Achievements",
-  "Partnerships",
-  "Student Activities",
-];
+const STATUS_LABELS: Record<ArticleStatus, string> = {
+  draft: "Draft",
+  pending: "Pending",
+  approved: "Posted",
+  archived: "Archived",
+};
 
 export function NewsSettings() {
-  const [items, setItems] = useState<NewsItem[]>(INITIAL_NEWS);
+  const [items, setItems] = useState<EditableArticle[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const addItem = () => {
-    setItems((prev) => [
-      ...prev,
-      {
-        id: Date.now().toString(),
-        title: "New News Item",
-        category: "Events",
-        summary: "Write a short summary here...",
-        imageUrl: "",
-      },
-    ]);
+  const loadArticles = async () => {
+    try {
+      setIsLoading(true);
+      const data = await fetchAdminArticles();
+      setItems(data);
+    } catch {
+      toast.error("Unable to load articles. Please sign in again.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const updateItem = (id: string, field: keyof NewsItem, value: string) => {
+  useEffect(() => {
+    void loadArticles();
+  }, []);
+
+  const addItem = async () => {
+    try {
+      const created = await createArticle({
+        title: "New Article",
+        body: "Write your article content here...",
+        image_path: null,
+        image_alt_text: null,
+      });
+      setItems((prev) => [created, ...prev]);
+      toast.success("Draft article created");
+    } catch {
+      toast.error("Failed to create article");
+    }
+  };
+
+  const updateItem = (id: string, field: keyof EditableArticle, value: string) => {
     setItems((prev) =>
       prev.map((item) => (item.id === id ? { ...item, [field]: value } : item))
     );
   };
 
-  const archiveItem = (id: string) => {
-    setItems((prev) => prev.filter((item) => item.id !== id));
+  const saveItem = async (item: EditableArticle) => {
+    try {
+      setItems((prev) => prev.map((a) => (a.id === item.id ? { ...a, isSaving: true } : a)));
+      const updated = await updateArticle(item.id, {
+        title: item.title,
+        body: item.body,
+        image_path: item.image_path ?? null,
+        image_alt_text: item.image_alt_text ?? null,
+      });
+      setItems((prev) => prev.map((a) => (a.id === item.id ? { ...updated, isSaving: false } : a)));
+      toast.success("Article saved");
+    } catch {
+      setItems((prev) => prev.map((a) => (a.id === item.id ? { ...a, isSaving: false } : a)));
+      toast.error("Failed to save article");
+    }
   };
 
-  const handleSave = () => {
-    toast.success("News placeholders saved (frontend only).");
+  const postItem = async (id: string) => {
+    try {
+      const updated = await updateArticleStatus(id, "approved");
+      setItems((prev) => prev.map((a) => (a.id === id ? updated : a)));
+      toast.success("Article posted to main website");
+    } catch {
+      toast.error("Failed to post article");
+    }
+  };
+
+  const archiveItem = async (id: string) => {
+    try {
+      const updated = await updateArticleStatus(id, "archived");
+      setItems((prev) => prev.map((a) => (a.id === id ? updated : a)));
+      toast.success("Article archived");
+    } catch {
+      toast.error("Failed to archive article");
+    }
   };
 
   return (
@@ -67,7 +105,7 @@ export function NewsSettings() {
           <div>
             <h2 className="text-base font-bold text-slate-900 uppercase tracking-wide">News Content Manager</h2>
             <p className="text-xs text-slate-600 mt-1">
-              Frontend placeholders only. No backend or database integration.
+              Connected to backend articles. Save edits, post, or archive articles.
             </p>
           </div>
           <button
@@ -81,6 +119,10 @@ export function NewsSettings() {
       </div>
 
       <div className="space-y-3">
+        {isLoading && (
+          <div className="ceit-card p-5 text-sm text-slate-600">Loading articles...</div>
+        )}
+
         {items.map((item) => (
           <div key={item.id} className="ceit-card p-5">
             <div className="flex items-center gap-2 mb-3">
@@ -88,9 +130,12 @@ export function NewsSettings() {
                 <Newspaper className="w-4 h-4" />
               </div>
               <h3 className="text-sm font-bold text-slate-900">News Item</h3>
+              <span className="ml-auto text-[10px] px-2 py-1 rounded bg-slate-100 text-slate-700 uppercase font-bold">
+                {STATUS_LABELS[item.status]}
+              </span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3">
               <div>
                 <label className="block text-xs font-bold text-slate-900 mb-2 uppercase">Headline</label>
                 <input
@@ -101,44 +146,46 @@ export function NewsSettings() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-900 mb-2 uppercase">Category</label>
-                <select
-                  value={item.category}
-                  onChange={(e) => updateItem(item.id, "category", e.target.value)}
-                  className="w-full px-3 py-2 bg-white border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
-                >
-                  {NEWS_CATEGORIES.map((category) => (
-                    <option key={category} value={category}>
-                      {category}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-xs font-bold text-slate-900 mb-2 uppercase">Summary</label>
+                <label className="block text-xs font-bold text-slate-900 mb-2 uppercase">Body</label>
                 <textarea
-                  value={item.summary}
-                  onChange={(e) => updateItem(item.id, "summary", e.target.value)}
-                  className="w-full px-3 py-2 bg-white border border-gray-300 text-sm h-20 resize-none focus:outline-none focus:ring-2 focus:ring-slate-900"
+                  value={item.body}
+                  onChange={(e) => updateItem(item.id, "body", e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-gray-300 text-sm h-28 resize-none focus:outline-none focus:ring-2 focus:ring-slate-900"
                 />
               </div>
-              <div className="md:col-span-2">
-                <label className="block text-xs font-bold text-slate-900 mb-2 uppercase">Image URL (Placeholder)</label>
+              <div>
+                <label className="block text-xs font-bold text-slate-900 mb-2 uppercase">Image URL</label>
                 <input
                   type="text"
                   placeholder="https://example.com/news-image.jpg"
-                  value={item.imageUrl}
-                  onChange={(e) => updateItem(item.id, "imageUrl", e.target.value)}
+                  value={item.image_path ?? ""}
+                  onChange={(e) => updateItem(item.id, "image_path", e.target.value)}
                   className="w-full px-3 py-2 bg-white border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
                 />
               </div>
             </div>
 
-            <div className="flex justify-end mt-3">
+            <div className="flex flex-wrap justify-end mt-3 gap-2">
+              <button
+                onClick={() => saveItem(item)}
+                disabled={item.isSaving}
+                className="px-3 py-2 bg-slate-900 text-white text-xs font-bold hover:bg-slate-800 uppercase inline-flex items-center gap-1.5 disabled:opacity-60"
+              >
+                <Save className="w-3.5 h-3.5" />
+                {item.isSaving ? "Saving..." : "Save"}
+              </button>
+              <button
+                onClick={() => postItem(item.id)}
+                className="px-3 py-2 bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 uppercase inline-flex items-center gap-1.5"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                Post
+              </button>
               <button
                 onClick={() => archiveItem(item.id)}
-                className="px-3 py-2 bg-orange-600 text-white text-xs font-bold hover:bg-orange-700 uppercase"
+                className="px-3 py-2 bg-orange-600 text-white text-xs font-bold hover:bg-orange-700 uppercase inline-flex items-center gap-1.5"
               >
+                <Archive className="w-3.5 h-3.5" />
                 Archive
               </button>
             </div>
@@ -149,17 +196,17 @@ export function NewsSettings() {
       <div className="ceit-card-soft p-4 flex items-start gap-2">
         <Megaphone className="w-4 h-4 text-slate-700 mt-0.5" />
         <p className="text-xs text-slate-700">
-          These fields are placeholders for frontend layout and content flow only.
+          Posted articles are reflected on the main website news feed.
         </p>
       </div>
 
       <div className="flex justify-end">
         <button
-          onClick={handleSave}
+          onClick={() => void loadArticles()}
           className="flex items-center gap-2 px-5 py-2 bg-slate-900 text-white font-bold hover:bg-slate-800 transition-colors text-xs uppercase"
         >
           <Save className="w-4 h-4" />
-          Save News Placeholders
+          Refresh Articles
         </button>
       </div>
     </div>

@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   CheckCircle2,
@@ -17,8 +17,10 @@ import {
 import { clsx } from "clsx";
 import { toast } from "sonner";
 import { usePathname, useSearchParams } from "next/navigation";
+import { fetchAdminArticles, updateArticleStatus } from "@/lib/api";
+import type { Article as ApiArticle } from "@/types/article";
 
-type ArticleStatus = "pending" | "approved" | "archive" | "deleted";
+type ArticleStatus = "pending" | "approved" | "archived" | "deleted";
 
 interface Article {
   id: string;
@@ -27,71 +29,48 @@ interface Article {
   author_id: string;
   author_name: string;
   status: ArticleStatus;
-  image_path: string;
-  image_alt: string;
+  image_path?: string | null;
+  image_alt?: string | null;
   created_at: string;
-  approved_at?: string;
-  archive_at?: string;
+  approved_at?: string | null;
+  archive_at?: string | null;
   deleted_at?: string;
 }
 
-// Mock data - replace with real API calls
-const ARTICLES_DATA: Article[] = [
-  {
-    id: "1",
-    title: "Engineering Students Win National Innovation Award",
-    body: "A team of Civil Engineering students from our institution has won the prestigious National Innovation Award for their groundbreaking sustainable construction project...",
-    author_id: "author_ce_001",
-    author_name: "Dr. Ahmed Hassan",
-    status: "pending",
-    image_path: "/images/award.jpg",
-    image_alt: "Students receiving award",
-    created_at: "2026-02-25T10:30:00Z",
-  },
-  {
-    id: "2",
-    title: "New Electrical Engineering Lab Equipment Arrives",
-    body: "The EE department has received state-of-the-art testing and measurement equipment sponsored by leading industry partners...",
-    author_id: "author_ee_001",
-    author_name: "Prof. Sarah Williams",
-    status: "pending",
-    image_path: "/images/lab.jpg",
-    image_alt: "New lab equipment",
-    created_at: "2026-02-24T14:15:00Z",
-  },
-  {
-    id: "3",
-    title: "IT Department Hosts Cybersecurity Workshop",
-    body: "Industry experts from major tech companies conducted a comprehensive cybersecurity awareness workshop for all IT students...",
-    author_id: "author_it_001",
-    author_name: "Dr. Michael Chen",
-    status: "pending",
-    image_path: "/images/workshop.jpg",
-    image_alt: "Workshop in progress",
-    created_at: "2026-02-23T09:45:00Z",
-  },
-  {
-    id: "4",
-    title: "Annual Engineering Expo Successfully Concludes",
-    body: "The annual engineering expo showcased innovative student projects and attracted industry recruiters...",
-    author_id: "author_ce_001",
-    author_name: "Dr. Ahmed Hassan",
-    status: "approved",
-    image_path: "/images/expo.jpg",
-    image_alt: "Expo booths",
-    created_at: "2026-02-20T11:00:00Z",
-    approved_at: "2026-02-21T10:30:00Z",
-  },
-];
+function mapApiArticle(article: ApiArticle): Article {
+  const fullName = `${article.author_first_name ?? ""} ${article.author_last_name ?? ""}`.trim();
+  const authorName = fullName || article.author_email || "Unknown Author";
+  const normalizedStatus: ArticleStatus =
+    article.status === "approved"
+      ? "approved"
+      : article.status === "archived"
+        ? "archived"
+        : "pending";
+
+  return {
+    id: article.id,
+    title: article.title,
+    body: article.body,
+    author_id: article.author_id,
+    author_name: authorName,
+    status: normalizedStatus,
+    image_path: article.image_path,
+    image_alt: article.image_alt_text ?? null,
+    created_at: article.created_at,
+    approved_at: article.approved_at,
+    archive_at: article.archived_at,
+  };
+}
 
 export default function ArticleApprovalsPage() {
-  const [articles, setArticles] = useState<Article[]>(ARTICLES_DATA);
+  const [articles, setArticles] = useState<Article[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const selectedStatusParam = searchParams.get("status");
   const selectedStatus: ArticleStatus =
     selectedStatusParam === "approved" ||
-    selectedStatusParam === "archive" ||
+    selectedStatusParam === "archived" ||
     selectedStatusParam === "deleted"
       ? selectedStatusParam
       : "pending";
@@ -102,37 +81,51 @@ export default function ArticleApprovalsPage() {
 
   const pendingCount = articles.filter((a) => a.status === "pending").length;
   const approvedCount = articles.filter((a) => a.status === "approved").length;
-  const archiveCount = articles.filter((a) => a.status === "archive").length;
+  const archiveCount = articles.filter((a) => a.status === "archived").length;
   const deletedCount = articles.filter((a) => a.status === "deleted").length;
   const statusTabs: Array<{ key: ArticleStatus; label: string; count: number }> = [
     { key: "pending", label: "Pending", count: pendingCount },
     { key: "approved", label: "Approved", count: approvedCount },
-    { key: "archive", label: "Archive", count: archiveCount },
+    { key: "archived", label: "Archive", count: archiveCount },
     { key: "deleted", label: "Deleted", count: deletedCount },
   ];
 
-  const handleApprove = (id: string) => {
-    setArticles((prev) =>
-      prev.map((article) =>
-        article.id === id
-          ? { ...article, status: "approved", approved_at: new Date().toISOString() }
-          : article
-      )
-    );
-    toast.success("Article approved successfully");
-    setReviewComment("");
+  useEffect(() => {
+    const loadArticles = async () => {
+      try {
+        setIsLoading(true);
+        const data = await fetchAdminArticles();
+        setArticles(data.map(mapApiArticle));
+      } catch {
+        toast.error("Failed to load articles. Please sign in again.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    void loadArticles();
+  }, []);
+
+  const handleApprove = async (id: string) => {
+    try {
+      const updated = await updateArticleStatus(id, "approved");
+      setArticles((prev) => prev.map((article) => (article.id === id ? mapApiArticle(updated) : article)));
+      toast.success("Article approved successfully");
+      setReviewComment("");
+    } catch {
+      toast.error("Failed to approve article");
+    }
   };
 
-  const handleReject = (id: string) => {
-    setArticles((prev) =>
-      prev.map((article) =>
-        article.id === id
-          ? { ...article, status: "archive", archive_at: new Date().toISOString() }
-          : article
-      )
-    );
-    toast.error("Article archived");
-    setReviewComment("");
+  const handleReject = async (id: string) => {
+    try {
+      const updated = await updateArticleStatus(id, "archived");
+      setArticles((prev) => prev.map((article) => (article.id === id ? mapApiArticle(updated) : article)));
+      toast.error("Article archived");
+      setReviewComment("");
+    } catch {
+      toast.error("Failed to archive article");
+    }
   };
 
   const handleDelete = (id: string) => {
@@ -162,14 +155,14 @@ export default function ArticleApprovalsPage() {
     const styles = {
       pending: "bg-amber-50 text-amber-700 border-amber-200",
       approved: "bg-green-50 text-green-700 border-green-200",
-      archive: "bg-slate-50 text-slate-700 border-slate-200",
+      archived: "bg-slate-50 text-slate-700 border-slate-200",
       deleted: "bg-red-50 text-red-700 border-red-200",
     };
 
     const icons = {
       pending: Clock,
       approved: CheckCircle2,
-      archive: Archive,
+      archived: Archive,
       deleted: Trash2,
     };
 
@@ -243,9 +236,9 @@ export default function ArticleApprovalsPage() {
         {filteredArticles.length === 0 ? (
           <div className="bg-white rounded-lg p-10 text-center border border-gray-200 shadow-sm">
             <AlertCircle className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-            <p className="text-gray-600 font-medium text-sm">No articles found</p>
+            <p className="text-gray-600 font-medium text-sm">{isLoading ? "Loading articles..." : "No articles found"}</p>
             <p className="text-xs text-gray-500 mt-1">
-              There are no items in this approval section.
+              {isLoading ? "Please wait while articles are being fetched." : "There are no items in this approval section."}
             </p>
           </div>
         ) : (
@@ -367,7 +360,7 @@ export default function ArticleApprovalsPage() {
                     </div>
                   )}
 
-                  {article.status === "archive" && (
+                  {article.status === "archived" && (
                     <div className="p-3 bg-gray-100 border border-gray-300 rounded-lg">
                       <div className="flex items-center gap-1.5 text-gray-700 text-xs font-semibold mb-0.5">
                         <Archive className="w-3.5 h-3.5" />
