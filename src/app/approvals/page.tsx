@@ -258,8 +258,8 @@ export default function ArticleApprovalsPage() {
                   {/* Thumbnail */}
                   <div className="w-20 h-20 rounded-lg bg-gradient-to-br from-blue-100 to-indigo-100 flex items-center justify-center flex-shrink-0 border border-gray-200 overflow-hidden">
                     <img
-                      src={article.image_path}
-                      alt={article.image_alt}
+                      src={article.image_path ?? undefined}
+                      alt={article.image_alt ?? undefined}
                       className="w-full h-full object-cover"
                       onError={(e) => {
                         (e.target as HTMLImageElement).style.display = "none";

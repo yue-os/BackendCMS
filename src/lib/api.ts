@@ -25,15 +25,15 @@ export interface CreateArticlePayload {
 }
 
 async function apiRequest<T>(path: string, init?: RequestInit, requireAuth = false): Promise<T> {
-  const headers: HeadersInit = {
+  const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    ...(init?.headers ?? {}),
+    ...(init?.headers as Record<string, string> ?? {}),
   };
 
   if (requireAuth && typeof window !== "undefined") {
     const token = localStorage.getItem("access_token");
     if (token) {
-      headers.Authorization = `Bearer ${token}`;
+      headers["Authorization"] = `Bearer ${token}`;
     }
   }
 
